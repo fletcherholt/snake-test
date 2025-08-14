@@ -1,1 +1,1 @@
-# photoshop-clone
+# Just learn, as best you can
