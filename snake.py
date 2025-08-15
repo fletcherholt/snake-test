@@ -156,6 +156,16 @@ class SnakeGame:
         self.death_particles = []
         self.death_anim_elapsed = 0.0
 
+        # Best score persistence
+        self.best = 0
+        self.best_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".snake_best")
+        try:
+            if os.path.isfile(self.best_file):
+                with open(self.best_file, "r", encoding="utf-8") as f:
+                    self.best = int(f.read().strip() or 0)
+        except Exception:
+            self.best = 0
+
         self.reset()
 
     def reset(self, base_speed: int | None = None):
@@ -168,7 +178,6 @@ class SnakeGame:
         self.snake_set = set(self.snake)
         self.grow = 0
         self.score = 0
-        self.best = 0
         self.moves_per_sec = base_speed if base_speed is not None else TICK_RATE
         self.spawn_food()
         self.alive = True
@@ -441,7 +450,13 @@ class SnakeGame:
 
     def game_over(self):
         self.alive = False
-        self.best = max(self.best, self.score)
+        if self.score > self.best:
+            self.best = self.score
+            try:
+                with open(self.best_file, "w", encoding="utf-8") as f:
+                    f.write(str(self.best))
+            except Exception:
+                pass
         # Spawn disintegration particles
         try:
             self._create_death_particles()
