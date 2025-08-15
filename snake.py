@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 """
 Classic Snake — standalone pygame implementation in a single Python file.
@@ -93,9 +92,14 @@ class SnakeGame:
         self.snd_die = None
         try:
             pygame.mixer.init()
-            self.snd_eat = self._make_beep(600, 0.08)
-            self.snd_die = self._make_beep(120, 0.25)
             self.sound_on = True
+            # Create fallback beeps if possible (do not disable sound if this fails)
+            try:
+                self.snd_eat = self._make_beep(600, 0.08)
+                self.snd_die = self._make_beep(120, 0.25)
+            except Exception:
+                self.snd_eat = None
+                self.snd_die = None
         except Exception:
             self.sound_on = False
 
@@ -108,10 +112,14 @@ class SnakeGame:
         self.music_loaded = False
         try:
             self.music_path = self._find_music_file()
-            if self.music_path:
+            if self.music_path and pygame.mixer.get_init():
                 pygame.mixer.music.load(self.music_path)
                 pygame.mixer.music.set_volume(0.45)
-                # Do not auto-play at launch; start when the player presses Start
+                # Auto-play at launch
+                try:
+                    pygame.mixer.music.play(-1)
+                except Exception:
+                    pass
                 self.music_loaded = True
         except Exception:
             # If loading/playing fails, continue without music
@@ -121,11 +129,28 @@ class SnakeGame:
         self.snd_explosion = None
         try:
             exp_path = self._find_explosion_file()
-            if exp_path:
-                self.snd_explosion = pygame.mixer.Sound(exp_path)
-                self.snd_explosion.set_volume(0.9)
+            if exp_path and pygame.mixer.get_init():
+                try:
+                    self.snd_explosion = pygame.mixer.Sound(exp_path)
+                    self.snd_explosion.set_volume(0.9)
+                except Exception:
+                    self.snd_explosion = None
         except Exception:
             self.snd_explosion = None
+
+        # Eat/Pickup SFX (optional) — override default beep if found
+        try:
+            eat_path = self._find_eat_file()
+            if eat_path and pygame.mixer.get_init():
+                try:
+                    self.snd_eat = pygame.mixer.Sound(eat_path)
+                    self.snd_eat.set_volume(0.6)
+                except Exception:
+                    # Keep fallback beep
+                    pass
+        except Exception:
+            # Keep fallback beep
+            pass
 
         # Death animation state
         self.death_particles = []
@@ -168,6 +193,24 @@ class SnakeGame:
         wave = ((np.sin(2 * np.pi * freq * t) > 0) * 2 - 1).astype("float32") * 0.2
         return pygame.sndarray.make_sound((wave * (2**15 - 1)).astype("int16"))
 
+    def _play_sfx(self, sound: pygame.mixer.Sound | None):
+        if not sound:
+            return
+        if not pygame.mixer.get_init():
+            return
+        try:
+            sound.play()
+        except Exception:
+            pass
+
+    def _music_play_loop(self):
+        if not self.music_loaded or not pygame.mixer.get_init():
+            return
+        try:
+            pygame.mixer.music.play(-1)
+        except Exception:
+            pass
+
     def _find_music_file(self) -> str | None:
         """Find a music file in project root to play as background music.
         Preference order: a known filename placed by the user, then any mp3/ogg/wav/flac.
@@ -199,6 +242,39 @@ class SnakeGame:
                 if any(lower.endswith(ext) for ext in (".wav", ".ogg", ".mp3", ".flac")):
                     if lower.startswith("explosion") or "explosion" in lower:
                         candidates.append(fname)
+        except Exception:
+            return None
+        if not candidates:
+            return None
+        # Prefer wav/ogg over mp3 for Sound compatibility
+        def rank(name: str) -> int:
+            n = name.lower()
+            if n.endswith(".wav"): return 0
+            if n.endswith(".ogg"): return 1
+            if n.endswith(".flac"): return 2
+            if n.endswith(".mp3"): return 3
+            return 10
+        best = sorted(candidates, key=rank)[0]
+        return os.path.join(root, best)
+
+    def _find_eat_file(self) -> str | None:
+        """Find an eat/pickup sfx in root; exclude explosion and the music file."""
+        root = os.path.dirname(os.path.abspath(__file__))
+        exts = (".wav", ".ogg", ".mp3", ".flac")
+        keywords = ("eat", "pickup", "coin", "chomp", "bite", "point", "sfx", "sound")
+        candidates: list[str] = []
+        try:
+            for fname in os.listdir(root):
+                lower = fname.lower()
+                if not any(lower.endswith(ext) for ext in exts):
+                    continue
+                # Skip music and explosion
+                if self.music_path and os.path.basename(self.music_path).lower() == lower:
+                    continue
+                if "explosion" in lower:
+                    continue
+                if any(k in lower for k in keywords):
+                    candidates.append(fname)
         except Exception:
             return None
         if not candidates:
@@ -352,8 +428,8 @@ class SnakeGame:
         if self.food and new_head == self.food:
             self.score += 1
             self.grow += 1
-            if self.sound_on and self.snd_eat:
-                self.snd_eat.play()
+            if self.sound_on:
+                self._play_sfx(self.snd_eat)
             if self.score % SPEEDUP_EVERY == 0:
                 self.moves_per_sec += SPEEDUP_AMOUNT
             self.spawn_food()
@@ -375,20 +451,14 @@ class SnakeGame:
             # If anything goes wrong, fall back to direct game over
             self.state = "gameover"
         # Stop background music
-        if self.music_loaded:
+        if self.music_loaded and pygame.mixer.get_init():
             try:
                 pygame.mixer.music.stop()
             except Exception:
                 pass
         # Play explosion sfx if available, else fallback to die beep
         if self.sound_on:
-            try:
-                if self.snd_explosion is not None:
-                    self.snd_explosion.play()
-                elif self.snd_die is not None:
-                    self.snd_die.play()
-            except Exception:
-                pass
+            self._play_sfx(self.snd_explosion or self.snd_die)
 
     # --------------------------- Draw --------------------------------
 
@@ -528,10 +598,19 @@ class SnakeGame:
         btn_label = "Start" if self.state == "menu" else "Resume"
         self.draw_button(layout["start"], btn_label, primary=True)
 
-        # Footer help
-        help_line = "Left/Right adjust • Enter/Space start • M toggle sound • ESC quit" if self.state == "menu" else "Left/Right adjust • Enter/Space resume • M toggle sound • ESC quit"
-        help_text = self.font.render(help_line, True, GRAY)
-        self.screen.blit(help_text, (panel.centerx - help_text.get_width() // 2, WIN_H - MARGIN - 34))
+        # Footer help (wrapped if too wide)
+        help_line = (
+            "Left/Right adjust • Enter/Space start • M toggle sound • ESC quit"
+            if self.state == "menu"
+            else "Left/Right adjust • Enter/Space resume • M toggle sound • ESC quit"
+        )
+        self._draw_centered_wrapped(
+            help_line,
+            y_bottom=WIN_H - MARGIN - 20,
+            color=GRAY,
+            max_width=WIN_W - (MARGIN * 2) - 20,
+            line_spacing=4,
+        )
 
     def handle_menu_click(self, pos):
         layout = self.get_menu_layout()
@@ -598,6 +677,32 @@ class SnakeGame:
         help_line = "Arrows/WASD move • P pause • R restart • M sound • ESC quit"
         help_s = self.font.render(help_line, True, GRAY)
         self.screen.blit(help_s, (MARGIN, hud_y + 26))
+
+    def _draw_centered_wrapped(self, text: str, *, y_bottom: int, color, max_width: int, line_spacing: int = 2):
+        """Draw text centered at the bottom with wrapping within max_width.
+        y_bottom is the bottom pixel where the last line baseline should sit above a little padding.
+        """
+        words = text.split(" ")
+        lines = []
+        cur = ""
+        for w in words:
+            trial = (cur + " " + w).strip()
+            surf = self.font.render(trial, True, color)
+            if surf.get_width() <= max_width or not cur:
+                cur = trial
+            else:
+                lines.append(cur)
+                cur = w
+        if cur:
+            lines.append(cur)
+
+        # Compute total height
+        line_surfs = [self.font.render(line, True, color) for line in lines]
+        total_h = sum(s.get_height() for s in line_surfs) + line_spacing * (len(line_surfs) - 1)
+        y = y_bottom - total_h
+        for s in line_surfs:
+            self.screen.blit(s, (WIN_W // 2 - s.get_width() // 2, y))
+            y += s.get_height() + line_spacing
 
     # --------------------- Death Animation ---------------------------
 
