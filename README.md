@@ -38,3 +38,9 @@ This is a classic Snake game implemented in Python using Pygame.
 - M: Toggle sound
 - ESC: Quit
 
+## Download
+Get the packaged ZIP of the latest release:
+
+- v1.0: https://github.com/fletcherholt/snake-test/archive/refs/tags/v1.0.zip
+
+
