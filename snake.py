@@ -516,14 +516,16 @@ class SnakeGame:
 
         self.draw_grid()
 
-        # Food
-        if self.food:
-            self.draw_block(self.food, RED)
+        # Skip drawing entities on Game Over screen
+        if self.state != "gameover":
+            # Food
+            if self.food:
+                self.draw_block(self.food, RED)
 
-        # Snake
-        for i, c in enumerate(self.snake):
-            color = GREEN if i == 0 else GREEN_D
-            self.draw_block(c, color)
+            # Snake
+            for i, c in enumerate(self.snake):
+                color = GREEN if i == 0 else GREEN_D
+                self.draw_block(c, color)
 
         # HUD
         self._draw_hud()
